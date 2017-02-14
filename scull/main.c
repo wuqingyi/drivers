@@ -2,6 +2,7 @@
 #include <linux/fcntl.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <asm-generic/uaccess.h>
 #include "scull.h"
 
 int scull_major = SCULL_MAJOR;
@@ -24,7 +25,8 @@ struct scull_dev *scull_devices;
 struct scull_qset *scull_follow(struct scull_dev *dev, int n)
 {
     struct scull_qset *qs = dev->data;
-    if (!qs) {
+    if (!qs)
+    {
         qs = dev->data = kmalloc(sizeof(struct scull_qset), GFP_KERNEL);
         if (qs == NULL)
             return NULL;  /* Never mind */
@@ -32,8 +34,10 @@ struct scull_qset *scull_follow(struct scull_dev *dev, int n)
     }
 
     /* Then follow the list */
-    while (n--) {
-        if (!qs->next) {
+    while (n--)
+    {
+        if (!qs->next)
+        {
             qs->next = kmalloc(sizeof(struct scull_qset), GFP_KERNEL);
             if (qs->next == NULL)
                 return NULL;  /* Never mind */
@@ -45,12 +49,39 @@ struct scull_qset *scull_follow(struct scull_dev *dev, int n)
     return qs;
 }
 
+int scull_trim(struct scull_dev *dev)
+{
+    struct scull_qset *next, *dptr;
+    int qset = dev->qset;   /* "dev" is not-null */
+    int i;
+
+    for (dptr = dev->data; dptr; dptr = next)   /* all the list items */
+    {
+        if (dptr->data)
+        {
+            for (i = 0; i < qset; i++)
+                kfree(dptr->data[i]);
+            kfree(dptr->data);
+            dptr->data = NULL;
+        }
+        next = dptr->next;
+        kfree(dptr);
+    }
+    dev->size = 0;
+    dev->quantum = scull_quantum;
+    dev->qset = scull_qset;
+    dev->data = NULL;
+    return 0;
+}
+
+
 loff_t scull_llseek (struct file *filep, loff_t off, int whence)
 {
     struct scull_dev *dev = filep->private_data;
     loff_t newpos;
 
-    switch (whence) {
+    switch (whence)
+    {
     case SEEK_SET:
         newpos = off;
         break;
@@ -71,7 +102,7 @@ loff_t scull_llseek (struct file *filep, loff_t off, int whence)
 ssize_t scull_read (struct file *filp, char __user *buf, size_t count,
                     loff_t *f_pos)
 {
-    struct scull_dev *dev = filep->private_data;
+    struct scull_dev *dev = filp->private_data;
     struct scull_qset *dptr;	/* the first list item */
     int quantum = dev->quantum, qset = dev->qset;
     int itemsize = quantum * qset; /* how many bytes in the list item */
@@ -88,7 +119,7 @@ ssize_t scull_read (struct file *filp, char __user *buf, size_t count,
     item = (long) *f_pos / itemsize;
     rest = (long) *f_pos %itemsize;
     s_pos = rest / quantum;
-    q_pos = reset % quantum;
+    q_pos = rest % quantum;
 
     dptr = scull_follow(dev, item);
 
@@ -97,7 +128,8 @@ ssize_t scull_read (struct file *filp, char __user *buf, size_t count,
     if (count > quantum - q_pos)
         count = quantum - q_pos;
 
-    if (copy_to_user(buf, dptr->data[s_pos] + q_pos, count)) {
+    if (copy_to_user(buf, dptr->data[s_pos] + q_pos, count))
+    {
         retval = -EFAULT;
         goto out;
     }
@@ -131,13 +163,15 @@ ssize_t scull_write (struct file *filp, const char __user *buf, size_t count,
     dptr = scull_follow(dev, item);
     if (dptr == NULL)
         goto out;
-    if (!dptr->data) {
+    if (!dptr->data)
+    {
         dptr->data = kmalloc(qset * sizeof(char *), GFP_KERNEL);
         if (!dptr->data)
             goto out;
         memset(dptr->data, 0, qset * sizeof(char *));
     }
-    if (!dptr->data[s_pos]) {
+    if (!dptr->data[s_pos])
+    {
         dptr->data[s_pos] = kmalloc(quantum, GFP_KERNEL);
         if (!dptr->data[s_pos])
             goto out;
@@ -146,7 +180,8 @@ ssize_t scull_write (struct file *filp, const char __user *buf, size_t count,
     if (count > quantum - q_pos)
         count = quantum - q_pos;
 
-    if (copy_from_user(dptr->data[s_pos]+q_pos, buf, count)) {
+    if (copy_from_user(dptr->data[s_pos]+q_pos, buf, count))
+    {
         retval = -EFAULT;
         goto out;
     }
@@ -162,9 +197,10 @@ out:
     return retval;
 }
 
-long scull_ioctl (struct file *, unsigned int, unsigned long)
+long scull_ioctl (struct file *filp, unsigned int cmd, unsigned long arg)
 {
     printk(KERN_WARNING "compatible_ioctl");
+    return 0;
 }
 
 int scull_open (struct inode *inode, struct file *filp)
@@ -174,13 +210,13 @@ int scull_open (struct inode *inode, struct file *filp)
     dev = container_of(inode->i_cdev, struct scull_dev, cdev);
     filp->private_data = dev;
 
-    if((filp->f_flags & O_ACCMODE) == O_WRONLY) {
+    if((filp->f_flags & O_ACCMODE) == O_WRONLY)
+    {
         if(down_interruptible(&dev->sem))
             return -ERESTARTSYS;
         scull_trim(dev);
         up(&dev->sem);
     }
-    spin
     return 0;
 }
 
@@ -190,7 +226,8 @@ int scull_release (struct inode *inode, struct file *filp)
     return 0;
 }
 
-file_operations scull_fops = {
+struct file_operations scull_fops =
+{
     .owner = THIS_MODULE,
     .llseek = scull_llseek,
     .read = scull_read,
@@ -200,38 +237,17 @@ file_operations scull_fops = {
     .release =  scull_release,
 };
 
-int scull_trim(struct scull_dev *dev)
-{
-    struct scull_qset *next, *dptr;
-    int qset = dev->qset;   /* "dev" is not-null */
-    int i;
-
-    for (dptr = dev->data; dptr; dptr = next) { /* all the list items */
-        if (dptr->data) {
-            for (i = 0; i < qset; i++)
-                kfree(dptr->data[i]);
-            kfree(dptr->data);
-            dptr->data = NULL;
-        }
-        next = dptr->next;
-        kfree(dptr);
-    }
-    dev->size = 0;
-    dev->quantum = scull_quantum;
-    dev->qset = scull_qset;
-    dev->data = NULL;
-    return 0;
-}
-
-void scull_cleanup_module()
+void scull_cleanup_module(void)
 {
     int i;
     dev_t devno = MKDEV(scull_major, scull_minor);
 
-    if(scull_devices) {
-        for(i=0; i < scull_nr_devs; i++) {
+    if(scull_devices)
+    {
+        for(i=0; i < scull_nr_devs; i++)
+        {
             scull_trim(scull_devices + i);
-            cdev_del(scull_devices[i].cdev);
+            cdev_del(&(scull_devices[i].cdev));
         }
         kfree(scull_devices);
     }
@@ -243,7 +259,7 @@ static void scull_setup_cdev(struct scull_dev *dev, int index)
 {
     int err, devno = MKDEV(scull_major, scull_minor + index);
 
-    cdev_init(dev->cdev, &scull_fops);
+    cdev_init(&dev->cdev, &scull_fops);
     dev->cdev.owner = THIS_MODULE;
     dev->cdev.ops = &scull_fops;
     err = cdev_add(&dev->cdev, devno, 1);
@@ -251,36 +267,42 @@ static void scull_setup_cdev(struct scull_dev *dev, int index)
         printk(KERN_NOTICE "Error %d adding scull%d", err, index);
 }
 
-static int __init scull_init_module()
+static int __init scull_init_module(void)
 {
     int result = -1, i;
     dev_t dev = 0;
 
-    if(scull_major) {
+    if(scull_major)
+    {
         dev = MKDEV(scull_major, scull_minor);
         result = register_chrdev_region(dev,scull_nr_devs,"scull");
-    } else {
+    }
+    else
+    {
         result = alloc_chrdev_region(&dev,scull_minor, scull_nr_devs,"scull");
         scull_major = MAJOR(dev);
     }
 
-    if(result < 0) {
+    if(result < 0)
+    {
         printk(KERN_WARNING "scull: can't get major %d\n", scull_major);
-        retur result;
+        return result;
     }
 
     scull_devices = kmalloc(scull_nr_devs * sizeof(struct scull_dev), GFP_KERNEL);
-    if(!scull_devices) {
+    if(!scull_devices)
+    {
         result = -ENOMEM;
         goto fail;
     }
 
     memset(scull_devices, 0, scull_nr_devs * sizeof(struct scull_dev));
-    for(i = 0; i < scull_nr_devs; i++) {
+    for(i = 0; i < scull_nr_devs; i++)
+    {
         scull_devices[i].quantum = scull_quantum;
         scull_devices[i].qset = scull_qset;
-        sema_init(&(scull_devices[i]->sem), 1);
-        scull_setup_cdev(scull_devices[i], i);
+        sema_init(&(scull_devices[i].sem), 1);
+        scull_setup_cdev(&scull_devices[i], i);
     }
     dev = MKDEV(scull_major, scull_minor);
     return 0;
