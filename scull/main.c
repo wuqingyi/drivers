@@ -3,6 +3,9 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <asm-generic/uaccess.h>
+#include <linux/errno.h>
+#include <uapi/asm-generic/errno.h>
+#include <uapi/asm-generic/errno-base.h>
 #include "scull.h"
 
 int scull_major = SCULL_MAJOR;
@@ -25,8 +28,7 @@ struct scull_dev *scull_devices;
 struct scull_qset *scull_follow(struct scull_dev *dev, int n)
 {
     struct scull_qset *qs = dev->data;
-    if (!qs)
-    {
+    if (!qs) {
         qs = dev->data = kmalloc(sizeof(struct scull_qset), GFP_KERNEL);
         if (qs == NULL)
             return NULL;  /* Never mind */
@@ -34,10 +36,8 @@ struct scull_qset *scull_follow(struct scull_dev *dev, int n)
     }
 
     /* Then follow the list */
-    while (n--)
-    {
-        if (!qs->next)
-        {
+    while (n--) {
+        if (!qs->next) {
             qs->next = kmalloc(sizeof(struct scull_qset), GFP_KERNEL);
             if (qs->next == NULL)
                 return NULL;  /* Never mind */
@@ -55,10 +55,8 @@ int scull_trim(struct scull_dev *dev)
     int qset = dev->qset;   /* "dev" is not-null */
     int i;
 
-    for (dptr = dev->data; dptr; dptr = next)   /* all the list items */
-    {
-        if (dptr->data)
-        {
+    for (dptr = dev->data; dptr; dptr = next) { /* all the list items */
+        if (dptr->data) {
             for (i = 0; i < qset; i++)
                 kfree(dptr->data[i]);
             kfree(dptr->data);
@@ -80,8 +78,7 @@ loff_t scull_llseek (struct file *filep, loff_t off, int whence)
     struct scull_dev *dev = filep->private_data;
     loff_t newpos;
 
-    switch (whence)
-    {
+    switch (whence) {
     case SEEK_SET:
         newpos = off;
         break;
@@ -128,8 +125,7 @@ ssize_t scull_read (struct file *filp, char __user *buf, size_t count,
     if (count > quantum - q_pos)
         count = quantum - q_pos;
 
-    if (copy_to_user(buf, dptr->data[s_pos] + q_pos, count))
-    {
+    if (copy_to_user(buf, dptr->data[s_pos] + q_pos, count)) {
         retval = -EFAULT;
         goto out;
     }
@@ -163,15 +159,13 @@ ssize_t scull_write (struct file *filp, const char __user *buf, size_t count,
     dptr = scull_follow(dev, item);
     if (dptr == NULL)
         goto out;
-    if (!dptr->data)
-    {
+    if (!dptr->data) {
         dptr->data = kmalloc(qset * sizeof(char *), GFP_KERNEL);
         if (!dptr->data)
             goto out;
         memset(dptr->data, 0, qset * sizeof(char *));
     }
-    if (!dptr->data[s_pos])
-    {
+    if (!dptr->data[s_pos]) {
         dptr->data[s_pos] = kmalloc(quantum, GFP_KERNEL);
         if (!dptr->data[s_pos])
             goto out;
@@ -180,8 +174,7 @@ ssize_t scull_write (struct file *filp, const char __user *buf, size_t count,
     if (count > quantum - q_pos)
         count = quantum - q_pos;
 
-    if (copy_from_user(dptr->data[s_pos]+q_pos, buf, count))
-    {
+    if (copy_from_user(dptr->data[s_pos]+q_pos, buf, count)) {
         retval = -EFAULT;
         goto out;
     }
@@ -199,8 +192,89 @@ out:
 
 long scull_ioctl (struct file *filp, unsigned int cmd, unsigned long arg)
 {
-    printk(KERN_WARNING "compatible_ioctl");
-    return 0;
+    int err = 0, tmp;
+    int retval = 0;
+
+    if(_IOC_TYPE(cmd) != SCULL_IOC_MAGIC)return -ENOTTY;
+    if(_IOC_NR(cmd) > SCULL_IOC_MAXNR) return -ENOTTY;
+
+    if(_IOC_DIR(cmd) & _IOC_READ)
+        //Access_ok验证指向用户空间的指针是否可用：允许访问返回非零值
+        err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
+    else if(_IOC_DIR(cmd) & _IOC_WRITE)
+        err = !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
+    if (err)return -EFAULT;
+
+    switch(cmd) {
+    case SCULL_IOCRESET:
+        scull_quantum = SCULL_QUANTUM;
+        scull_qset = SCULL_QSET;
+        break;
+
+    case SCULL_IOCSQUANTUM:
+        if(capable(CAP_SYS_ADMIN)) //如果具有指定的权限，返回非零值
+            return -EPERM;
+        //__put_user和__get_user用于向(或从)用户空间保存(或获取)单个数据的宏
+        retval = __get_user(scull_quantum, (int __user *)arg);
+        break;
+    case SCULL_IOCTQUANTUM:
+        if(!capable(CAP_SYS_ADMIN))
+            return -EPERM;
+        scull_quantum = arg;
+        break;
+
+    case SCULL_IOCGQUANTUM:
+        retval = __put_user(scull_quantum, (int __user *)arg);
+        break;
+
+    case SCULL_IOCQQUANTUM:
+        return scull_quantum;
+
+    case SCULL_IOCXQUANTUM:
+        if(!capable(CAP_SYS_ADMIN))
+            return EPERM;
+        tmp = scull_quantum;
+        retval = __get_user(scull_quantum, (int __user *)arg);
+        if(retval == 0)
+            retval = __put_user(tmp, (int __user *)arg);
+        break;
+
+    case SCULL_IOCSQSET:
+        if(!capable(CAP_SYS_ADMIN))
+            return -EPERM;
+        retval = __get_user(scull_qset, (int __user *)arg);
+        break;
+
+    case SCULL_IOCTQSET:
+        if(!capable(CAP_SYS_ADMIN))
+            return -EPERM;
+        scull_qset = arg;
+        break;
+
+    case SCULL_IOCGQSET:
+        retval = __put_user(scull_qset, (int __user *)arg);
+        break;
+
+    case SCULL_IOCQQSET:
+        retun scull_qset;
+
+    case SCULL_IOCXQSET:
+        if(!capable(CAP_SYS_ADMIN))
+            return -EPERM;
+        tmp = scull_qset;
+        retval = __get_user(scull_qset, (int __user *)arg);
+        if(retval == 0)
+            retval = __put_user(tmp, (int __user*)arg);
+        break;
+
+    case SCULL_IOCHQSET:
+        if(!capable(CAP_SYS_ADMIN))
+            return -EPERM;
+        tmp = scull_qset;
+        scull_qset arg;
+
+    }
+    return retval;
 }
 
 int scull_open (struct inode *inode, struct file *filp)
@@ -210,8 +284,7 @@ int scull_open (struct inode *inode, struct file *filp)
     dev = container_of(inode->i_cdev, struct scull_dev, cdev);
     filp->private_data = dev;
 
-    if((filp->f_flags & O_ACCMODE) == O_WRONLY)
-    {
+    if((filp->f_flags & O_ACCMODE) == O_WRONLY) {
         if(down_interruptible(&dev->sem))
             return -ERESTARTSYS;
         scull_trim(dev);
@@ -226,8 +299,7 @@ int scull_release (struct inode *inode, struct file *filp)
     return 0;
 }
 
-struct file_operations scull_fops =
-{
+struct file_operations scull_fops = {
     .owner = THIS_MODULE,
     .llseek = scull_llseek,
     .read = scull_read,
@@ -242,10 +314,8 @@ void scull_cleanup_module(void)
     int i;
     dev_t devno = MKDEV(scull_major, scull_minor);
 
-    if(scull_devices)
-    {
-        for(i=0; i < scull_nr_devs; i++)
-        {
+    if(scull_devices) {
+        for(i=0; i < scull_nr_devs; i++) {
             scull_trim(scull_devices + i);
             cdev_del(&(scull_devices[i].cdev));
         }
@@ -272,33 +342,27 @@ static int __init scull_init_module(void)
     int result = -1, i;
     dev_t dev = 0;
 
-    if(scull_major)
-    {
+    if(scull_major) {
         dev = MKDEV(scull_major, scull_minor);
         result = register_chrdev_region(dev,scull_nr_devs,"scull");
-    }
-    else
-    {
+    } else {
         result = alloc_chrdev_region(&dev,scull_minor, scull_nr_devs,"scull");
         scull_major = MAJOR(dev);
     }
 
-    if(result < 0)
-    {
+    if(result < 0) {
         printk(KERN_WARNING "scull: can't get major %d\n", scull_major);
         return result;
     }
 
     scull_devices = kmalloc(scull_nr_devs * sizeof(struct scull_dev), GFP_KERNEL);
-    if(!scull_devices)
-    {
+    if(!scull_devices) {
         result = -ENOMEM;
         goto fail;
     }
 
     memset(scull_devices, 0, scull_nr_devs * sizeof(struct scull_dev));
-    for(i = 0; i < scull_nr_devs; i++)
-    {
+    for(i = 0; i < scull_nr_devs; i++) {
         scull_devices[i].quantum = scull_quantum;
         scull_devices[i].qset = scull_qset;
         sema_init(&(scull_devices[i].sem), 1);
