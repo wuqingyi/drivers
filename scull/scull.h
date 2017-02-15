@@ -2,8 +2,8 @@
 #define SCULL_H_INCLUDED
 
 #include <linux/semaphore.h>
-#include <linux/cdev.h>
 #include <asm-generic/ioctl.h>
+#include <linux/cdev.h>
 
 #ifndef SCULL_MAJOR
 #define SCULL_MAJOR 0
