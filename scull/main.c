@@ -199,7 +199,7 @@ long scull_ioctl (struct file *filp, unsigned int cmd, unsigned long arg)
     if(_IOC_NR(cmd) > SCULL_IOC_MAXNR) return -ENOTTY;
 
     if(_IOC_DIR(cmd) & _IOC_READ)
-        //Access_okÑéÖ¤Ö¸ÏòÓÃ»§¿Õ¼äµÄÖ¸ÕëÊÇ·ñ¿ÉÓÃ£ºÔÊĞí·ÃÎÊ·µ»Ø·ÇÁãÖµ
+        //Access_okéªŒè¯æŒ‡å‘ç”¨æˆ·ç©ºé—´çš„æŒ‡é’ˆæ˜¯å¦å¯ç”¨ï¼šå…è®¸è®¿é—®è¿”å›éé›¶å€¼
         err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
     else if(_IOC_DIR(cmd) & _IOC_WRITE)
         err = !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
@@ -212,9 +212,9 @@ long scull_ioctl (struct file *filp, unsigned int cmd, unsigned long arg)
         break;
 
     case SCULL_IOCSQUANTUM:
-        if(capable(CAP_SYS_ADMIN)) //Èç¹û¾ßÓĞÖ¸¶¨µÄÈ¨ÏŞ£¬·µ»Ø·ÇÁãÖµ
+        if(!capable(CAP_SYS_ADMIN)) //å¦‚æœå…·æœ‰æŒ‡å®šçš„æƒé™ï¼Œè¿”å›éé›¶å€¼
             return -EPERM;
-        //__put_userºÍ__get_userÓÃÓÚÏò(»ò´Ó)ÓÃ»§¿Õ¼ä±£´æ(»ò»ñÈ¡)µ¥¸öÊı¾İµÄºê
+        //__put_userå’Œ__get_userç”¨äºå‘(æˆ–ä»)ç”¨æˆ·ç©ºé—´ä¿å­˜(æˆ–è·å–)å•ä¸ªæ•°æ®çš„å®
         retval = __get_user(scull_quantum, (int __user *)arg);
         break;
     case SCULL_IOCTQUANTUM:
@@ -232,12 +232,19 @@ long scull_ioctl (struct file *filp, unsigned int cmd, unsigned long arg)
 
     case SCULL_IOCXQUANTUM:
         if(!capable(CAP_SYS_ADMIN))
-            return EPERM;
+            return -EPERM;
         tmp = scull_quantum;
         retval = __get_user(scull_quantum, (int __user *)arg);
         if(retval == 0)
             retval = __put_user(tmp, (int __user *)arg);
         break;
+
+    case SCULL_IOCHQUANTUM: /* sHift: like Tell + Query */
+        if (!capable (CAP_SYS_ADMIN))
+            return -EPERM;
+        tmp = scull_quantum;
+        scull_quantum = arg;
+        return tmp;
 
     case SCULL_IOCSQSET:
         if(!capable(CAP_SYS_ADMIN))
@@ -272,9 +279,10 @@ long scull_ioctl (struct file *filp, unsigned int cmd, unsigned long arg)
             return -EPERM;
         tmp = scull_qset;
         scull_qset arg;
+        return tmp;
 
-
-
+    default:  /* redundant, as cmd was checked against MAXNR */
+        return -ENOTTY;
     }
     return retval;
 }

@@ -21,14 +21,12 @@
 #define SCULL_QSET    1000
 #endif // SCULL_QSET
 
-struct scull_qset
-{
+struct scull_qset {
     void **data;
     struct scull_qset *next;
 };
 
-struct scull_dev
-{
+struct scull_dev {
     struct scull_qset *data;
     int quantum;
     int qset;
