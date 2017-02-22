@@ -378,7 +378,6 @@ static int __init scull_init_module(void)
         sema_init(&(scull_devices[i].sem), 1);
         scull_setup_cdev(&scull_devices[i], i);
     }
-    dev = MKDEV(scull_major, scull_minor);
     return 0;
 fail:
     scull_cleanup_module();
