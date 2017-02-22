@@ -305,7 +305,6 @@ int scull_open (struct inode *inode, struct file *filp)
 
 int scull_release (struct inode *inode, struct file *filp)
 {
-    printk(KERN_WARNING "release");
     return 0;
 }
 
