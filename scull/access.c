@@ -76,13 +76,38 @@ static int scull_u_release(stuct inode *inode, struct file *filp)
     return 0;
 }
 
+static struct scull_dev scull_w_device;
+static int scull_w_count;
+static uid_t scull_w_owner;
+static DECLARE_WAIT_QUEUE_HEAD(scull_w_wait);
+static spinlock_t scull_w_lock;
+spin_lock_init(scull_w_lock);
+
+static inline int scull_w_available(void)
+{
+    return scull_w_count == 0 ||
+           scull_w_owner == current->uid ||
+           scull_w_owner == current->euid ||
+           capable(CAP_DAC_OVERRIDE);
+}
+
 /////////////////////////////////////////////////////////////////////////////////
 struct file_operations scull_sngl_fops = {
-    .owner =	THIS_MODULE,
+    .owner =	    THIS_MODULE,
     .llseek =     	scull_llseek,
     .read =       	scull_read,
     .write =      	scull_write,
     .ioctl =      	scull_ioctl,
     .open =       	scull_s_open,
     .release =    	scull_s_release,
+};
+
+struct file_operations scull_user_fops = {
+    .owner =    THIS_MODULE,
+    .llseek =   scull_llseek,
+    .read =     scull_read,
+    .write =    scull_write,
+    .ioctl =    scull_ioctl,
+    .open =     scull_u_open,
+    .release =  scull_u_release,
 };
