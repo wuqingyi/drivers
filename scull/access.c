@@ -91,6 +91,40 @@ static inline int scull_w_available(void)
            capable(CAP_DAC_OVERRIDE);
 }
 
+static int scull_w_open(struct inode *inode, struct file *filp)
+{
+    struct scull_dev *dev = &scull_w_device;
+
+    spin_lock(&scull_w_lock);
+    while(!scull_w_available()){
+        spin_unlock(&scull_w_lock);
+        if(filp->f_flags & O_ACCMODE) return -EAGAIN;
+        if(wait_event_interruptible(scull_w_wait, scull_w_available()))
+            return -ERESTARTSYS;
+        spin_lock(&scull_w_lock);
+    }
+    if(scull_w_count == 0)
+        scull_w_owner = current->uid;
+    scull_w_count++;
+    spin_unlock(&scull_w_lock);
+
+    if((filp->f_flags & O_ACCMODE) == O_WRONLY)
+        scull_trim(dev);
+    filp->private_data = dv;
+}
+
+static int scull_w_release(struct inode *inode, struct file *filp)
+{
+    int tmp;
+    spin_lock(&scull_w_lock);
+    scull_w_count--;
+    tmp = scull_w_count;
+    spin_unlock(&scull_w_lock);
+
+    if(tmp == 0)
+        wake_up_interruptible_sync(&scull_w_wait);
+    return 0;
+}
 /////////////////////////////////////////////////////////////////////////////////
 struct file_operations scull_sngl_fops = {
     .owner =	    THIS_MODULE,
